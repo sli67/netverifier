@@ -1,0 +1,22 @@
+{
+  "name": "verifier",
+  "private": true,
+  "packageManager": "pnpm@12.14.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm -C api dev",
+    "dev:dashboard": "pnpm -C dashboard dev",
+    "worker": "cd worker && uv run --env-file .env python -m verifier_worker",
+    "deploy-worker": "cd worker && uv run --env-file .env python -m verifier_worker --deploy",
+    "index-docs": "cd worker && uv run --env-file .env python -m verifier_worker.docs",
+    "test:worker": "pnpm -C api migrate --test && cd worker && uv run pytest -q",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "migrate": "pnpm -C api migrate",
+    "create-user": "pnpm -C api create-user",
+    "test": "pnpm -C api test"
+  }
+}

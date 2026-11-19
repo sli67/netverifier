@@ -1,0 +1,8 @@
+packages:
+  - api
+  - dashboard
+
+# Both packages ship prebuilt binaries, so their install scripts are not needed.
+allowBuilds:
+  argon2: false
+  esbuild: false
