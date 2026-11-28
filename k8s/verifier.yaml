@@ -1,0 +1,173 @@
+# Applied by scripts/k3s-deploy.sh, which fills in __TAG__ (git commit) and
+# __CONFIG__ (a hash of the secret, so pods restart when it changes).
+# The verifier-env secret is created by the script.
+
+# ───────── Postgres + pgvector (app node), data on the node's disk ─────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: verifier
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      nodeSelector: { role: app }
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          env:
+            - { name: POSTGRES_USER, value: verifier }
+            - { name: POSTGRES_DB, value: verifier }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: verifier-env, key: POSTGRES_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "verifier", "-d", "verifier"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          hostPath: { path: /var/lib/verifier/postgres, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: verifier
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432 }]
+---
+# ───────── API (app node); migrations run first in an init container ─────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: verifier
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+      annotations: { verifier/config: "__CONFIG__" }
+    spec:
+      nodeSelector: { role: app }
+      initContainers:
+        - name: migrate
+          image: registry.verifier.internal/verifier-api:__TAG__
+          command: ["node", "dist/migrate.js"]
+          envFrom: [{ secretRef: { name: verifier-env } }]
+      containers:
+        - name: api
+          image: registry.verifier.internal/verifier-api:__TAG__
+          envFrom: [{ secretRef: { name: verifier-env } }]
+          env:
+            # Plain HTTP: "production" marks the session cookie Secure and browsers drop it.
+            - { name: NODE_ENV, value: development }
+            - { name: PORT, value: "3000" }
+          ports: [{ containerPort: 3000 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: verifier
+spec:
+  selector: { app: api }
+  ports: [{ port: 3000 }]
+---
+# ───────── Dashboard (app node): nginx serving the build, proxying /api ─────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: verifier
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dashboard }
+  template:
+    metadata:
+      labels: { app: dashboard }
+    spec:
+      nodeSelector: { role: app }
+      containers:
+        - name: dashboard
+          image: registry.verifier.internal/verifier-dashboard:__TAG__
+          ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: verifier
+spec:
+  selector: { app: dashboard }
+  ports: [{ port: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: verifier
+  namespace: verifier
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port: { number: 80 }
+---
+# ───────── Agent worker + its own Batfish (worker node) ─────────
+# One worker per Batfish: add capacity by adding worker nodes and replicas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: verifier
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+      annotations: { verifier/config: "__CONFIG__" }
+    spec:
+      nodeSelector: { role: worker }
+      containers:
+        - name: batfish
+          image: batfish/allinone@sha256:54cb0ed94fd9a3c1ca0985f73e5be479e955cee9b9f6a6799b66be3364fd8e5c
+          volumeMounts:
+            - { name: batfish-data, mountPath: /data }
+        - name: worker
+          image: registry.verifier.internal/verifier-worker:__TAG__
+          envFrom: [{ secretRef: { name: verifier-env } }]
+          env:
+            - { name: BATFISH_HOST, value: "127.0.0.1" }
+            - { name: BATFISH_INSTANCE, value: k3s-batfish }
+      volumes:
+        # Parsed Batfish models are a cache; keeping them on the node avoids re-parsing.
+        - name: batfish-data
+          hostPath: { path: /var/lib/verifier/batfish, type: DirectoryOrCreate }

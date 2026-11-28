@@ -1,0 +1,40 @@
+node_modules/
+dist/
+.env
+corpus/raw/
+.venv/
+__pycache__/
+
+# Environment files (keep the committed examples)
+.env.*
+!.env.example
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / Vite
+*.tsbuildinfo
+.vite/
+coverage/
+
+# Containerlab runtime directories
+clab-*/
+
+# Logs, OS and editor files
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json
+CLAUDE.md 
+arch.md
+examples/
+docs/
+
+.terraform/
+*.tfstate
+*.tfstate.*

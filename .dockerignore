@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.env
+.git
+.terraform
+*.tfstate*
+resume-project-copy
+docs
+corpus/raw
+
+
